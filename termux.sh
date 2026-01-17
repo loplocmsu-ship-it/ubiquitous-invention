@@ -35,6 +35,10 @@ ok() { echo -e "${GRN}[OK]${NC} $1"; }
 warn() { echo -e "${YLW}[WARN]${NC} $1"; }
 die() { echo -e "${RED}[FATAL]${NC} $1"; echo "--- crash log: ~/ghosty_crash.log ---"; exit 1; }
 
+get_zip_version() {
+    echo "$1" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+}
+
 ver_compare() {
     [ "$1" = "$2" ] && return 1
     local IFS=.
@@ -139,6 +143,7 @@ if [ $need_install -eq 1 ]; then
     
     zipfile=""
     foundpath=""
+    zip_version=""
     
     dbg "searching for zip..."
     for p in "${paths[@]}"; do
@@ -146,34 +151,44 @@ if [ $need_install -eq 1 ]; then
         dbg "checking: $p"
         for zf in "$p"/GhoSty*OwO*.zip "$p"/ghosty*.zip "$p"/Ghosty*.zip; do
             if [ -f "$zf" ]; then
-                zipfile=$(basename "$zf")
-                foundpath="$p"
-                ok "found: $zf"
-                break 2
+                tmp_zip=$(basename "$zf")
+                tmp_ver=$(get_zip_version "$tmp_zip")
+                dbg "found: $tmp_zip (v$tmp_ver)"
+                
+                # check if this zip matches required version
+                if [ "$tmp_ver" = "$GHOSTY_VERSION" ]; then
+                    zipfile="$tmp_zip"
+                    foundpath="$p"
+                    zip_version="$tmp_ver"
+                    ok "matched: v$zip_version"
+                    break 2
+                else
+                    dbg "skipping: need v$GHOSTY_VERSION, found v$tmp_ver"
+                fi
             fi
         done
     done
     
-    # no zip found
+    # no matching zip found
     if [ -z "$foundpath" ]; then
+        echo ""
+        echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         if [ $is_upgrade -eq 1 ]; then
-            echo ""
-            echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo -e "${YLW}  UPDATE AVAILABLE: v$installed_version -> v$GHOSTY_VERSION${NC}"
-            echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo ""
-            echo "  Please download GhoSty_OwO_V${GHOSTY_VERSION}.zip"
-            echo "  and put it in your Downloads folder"
-            echo ""
-            echo "  Then run this script again"
-            echo ""
-            die "zip v$GHOSTY_VERSION not found"
+            echo -e "${YLW}  UPDATE REQUIRED: v$installed_version -> v$GHOSTY_VERSION${NC}"
         else
-            die "no zip found, download GhoSty to Downloads"
+            echo -e "${YLW}  INSTALL REQUIRED: v$GHOSTY_VERSION${NC}"
         fi
+        echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo "  Please download: GhoSty_OwO_V${GHOSTY_VERSION}.zip"
+        echo "  Put it in your Downloads folder"
+        echo ""
+        echo "  Then run this script again"
+        echo ""
+        die "zip v$GHOSTY_VERSION not found"
     fi
     
-    # backup token before upgrade
+    # backup token
     old_token=""
     if [ -f "$ghosty_home/config.json" ]; then
         old_token=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' "$ghosty_home/config.json" | cut -d'"' -f4)
@@ -205,19 +220,19 @@ if [ $need_install -eq 1 ]; then
     fi
     rm -rf "$tmpextract"
     
-    # save version
-    echo "$GHOSTY_VERSION" > "$ghosty_home/.ghosty_version"
+    # save version from zip, not script
+    echo "$zip_version" > "$ghosty_home/.ghosty_version"
     
     if [ $is_upgrade -eq 1 ]; then
-        ok "upgraded to v$GHOSTY_VERSION"
+        ok "upgraded to v$zip_version"
     else
-        ok "installed v$GHOSTY_VERSION"
+        ok "installed v$zip_version"
     fi
     
-    # restore token (skip token prompt on upgrade)
+    # restore token
     if [ -n "$old_token" ]; then
         sed -i "s/YOUR_TOKEN_HERE/$old_token/g" "$ghosty_home/config.json" 2>/dev/null
-        ok "token restored (no re-enter needed)"
+        ok "token restored"
     fi
 fi
 
@@ -225,9 +240,10 @@ fi
 cd "$ghosty_home" || die "can't cd to $ghosty_home"
 [ ! -f "config.json" ] && die "config.json missing"
 
+current_ver=$(cat "$version_file" 2>/dev/null || echo "unknown")
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  GhoSty OwO v$GHOSTY_VERSION"
+echo "  GhoSty OwO v$current_ver"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 dbg "config preview:"
