@@ -1,6 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Made by Bisam - DEBUG VERSION
 
+GHOSTY_VERSION="4.0.3"
+
 # === AUTO UPDATE ===
 SCRIPT_URL="https://raw.githubusercontent.com/loplocmsu-ship-it/ubiquitous-invention/refs/heads/main/termux.sh"
 SCRIPT_PATH="$HOME/termux.sh"
@@ -33,11 +35,22 @@ ok() { echo -e "${GRN}[OK]${NC} $1"; }
 warn() { echo -e "${YLW}[WARN]${NC} $1"; }
 die() { echo -e "${RED}[FATAL]${NC} $1"; echo "--- crash log: ~/ghosty_crash.log ---"; exit 1; }
 
+ver_compare() {
+    [ "$1" = "$2" ] && return 1
+    local IFS=.
+    local i v1=($1) v2=($2)
+    for ((i=0; i<3; i++)); do
+        [ "${v1[i]:-0}" -gt "${v2[i]:-0}" ] && return 0
+        [ "${v1[i]:-0}" -lt "${v2[i]:-0}" ] && return 2
+    done
+    return 1
+}
+
 exec > >(tee -a ~/ghosty_crash.log) 2>&1
 echo "=== RUN $(date) ===" >> ~/ghosty_crash.log
 
 clear
-echo "=== GhoSty OwO Auto Setup ==="
+echo "=== GhoSty OwO Auto Setup v$GHOSTY_VERSION ==="
 echo "    Made by Bisam (debug mode)"
 echo ""
 
@@ -80,174 +93,205 @@ if [ ${#missing[@]} -gt 0 ]; then
 fi
 
 ghosty_home="$HOME/ghosty"
+version_file="$ghosty_home/.ghosty_version"
 dbg "ghosty_home = $ghosty_home"
 
-if [ -d "$ghosty_home" ] && [ -f "$ghosty_home/config.json" ]; then
-    dbg "existing install found"
-    cd "$ghosty_home" || die "can't cd to $ghosty_home"
+# check installed version
+installed_version=""
+need_install=0
+is_upgrade=0
+
+if [ -f "$version_file" ]; then
+    installed_version=$(cat "$version_file")
+    dbg "installed: v$installed_version"
     
-    dbg "config preview:"
-    cat config.json | sed 's/"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"/"TOKEN": "***"/g' | head -15
+    ver_compare "$GHOSTY_VERSION" "$installed_version"
+    case $? in
+        0) 
+            warn "update available: v$installed_version -> v$GHOSTY_VERSION"
+            need_install=1
+            is_upgrade=1
+            ;;
+        1) ok "already v$GHOSTY_VERSION" ;;
+        2) ok "v$installed_version is newer, skipping" ;;
+    esac
+elif [ -d "$ghosty_home" ] && [ -f "$ghosty_home/config.json" ]; then
+    warn "old install without version tracking"
+    need_install=1
+    is_upgrade=1
+else
+    dbg "fresh install"
+    need_install=1
+fi
+
+# install/upgrade
+if [ $need_install -eq 1 ]; then
+    paths=(
+        "/storage/emulated/0/Download"
+        "/storage/emulated/0"
+        "/sdcard/Download"
+        "/sdcard"
+        "$HOME/storage/downloads"
+        "$HOME/storage/shared/Download"
+        "$HOME"
+        "$(pwd)"
+    )
     
-    token_val=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' config.json | cut -d'"' -f4)
-    dbg "token: ${token_val:0:10}..."
+    zipfile=""
+    foundpath=""
     
-    if [ "$token_val" = "YOUR_TOKEN_HERE" ] || [ -z "$token_val" ]; then
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        read -p "Enter Discord token: " tok
-        [ -z "$tok" ] && die "empty token"
-        
-        dbg "token length: ${#tok}"
-        [[ ! "$tok" =~ ^[A-Za-z0-9._-]+$ ]] && warn "token has weird chars"
-        
-        dbg "validating with discord..."
-        resp=$(curl -s -o /tmp/discord_resp.json -w "%{http_code}" \
-            -H "Authorization: $tok" \
-            https://discord.com/api/v10/users/@me)
-        curl_ret=$?
-        
-        dbg "curl exit: $curl_ret, http: $resp"
-        [ $curl_ret -ne 0 ] && die "curl failed - network issue?"
-        [ -f /tmp/discord_resp.json ] && dbg "response: $(cat /tmp/discord_resp.json | head -3)"
-        
-        case "$resp" in
-            200)
-                ok "token valid"
-                cp config.json config.json.bak
-                tok_escaped=$(printf '%s\n' "$tok" | sed -e 's/[\/&]/\\&/g')
-                sed -i "s/YOUR_TOKEN_HERE/$tok_escaped/g" config.json
-                [ $? -ne 0 ] && python3 -c "
+    dbg "searching for zip..."
+    for p in "${paths[@]}"; do
+        [ ! -d "$p" ] && continue
+        dbg "checking: $p"
+        for zf in "$p"/GhoSty*OwO*.zip "$p"/ghosty*.zip "$p"/Ghosty*.zip; do
+            if [ -f "$zf" ]; then
+                zipfile=$(basename "$zf")
+                foundpath="$p"
+                ok "found: $zf"
+                break 2
+            fi
+        done
+    done
+    
+    # no zip found
+    if [ -z "$foundpath" ]; then
+        if [ $is_upgrade -eq 1 ]; then
+            echo ""
+            echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${YLW}  UPDATE AVAILABLE: v$installed_version -> v$GHOSTY_VERSION${NC}"
+            echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo "  Please download GhoSty_OwO_V${GHOSTY_VERSION}.zip"
+            echo "  and put it in your Downloads folder"
+            echo ""
+            echo "  Then run this script again"
+            echo ""
+            die "zip v$GHOSTY_VERSION not found"
+        else
+            die "no zip found, download GhoSty to Downloads"
+        fi
+    fi
+    
+    # backup token before upgrade
+    old_token=""
+    if [ -f "$ghosty_home/config.json" ]; then
+        old_token=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' "$ghosty_home/config.json" | cut -d'"' -f4)
+        [ "$old_token" = "YOUR_TOKEN_HERE" ] && old_token=""
+        [ -n "$old_token" ] && dbg "backed up token"
+    fi
+    
+    rm -rf "$ghosty_home"
+    cd "$foundpath" || die "can't cd to $foundpath"
+    
+    tmpextract="$HOME/ghosty_tmp"
+    rm -rf "$tmpextract"
+    mkdir -p "$tmpextract" || die "can't create temp dir"
+    
+    dbg "extracting $zipfile..."
+    unzip -o "$zipfile" -d "$tmpextract"
+    [ $? -ne 0 ] && die "unzip failed"
+    ok "extracted"
+    
+    contents=$(ls -A "$tmpextract")
+    count=$(echo "$contents" | wc -l)
+    first=$(echo "$contents" | head -1)
+    dbg "items: $count, first: $first"
+    
+    if [ $count -eq 1 ] && [ -d "$tmpextract/$first" ]; then
+        mv "$tmpextract/$first" "$ghosty_home"
+    else
+        mv "$tmpextract" "$ghosty_home"
+    fi
+    rm -rf "$tmpextract"
+    
+    # save version
+    echo "$GHOSTY_VERSION" > "$ghosty_home/.ghosty_version"
+    
+    if [ $is_upgrade -eq 1 ]; then
+        ok "upgraded to v$GHOSTY_VERSION"
+    else
+        ok "installed v$GHOSTY_VERSION"
+    fi
+    
+    # restore token (skip token prompt on upgrade)
+    if [ -n "$old_token" ]; then
+        sed -i "s/YOUR_TOKEN_HERE/$old_token/g" "$ghosty_home/config.json" 2>/dev/null
+        ok "token restored (no re-enter needed)"
+    fi
+fi
+
+# run
+cd "$ghosty_home" || die "can't cd to $ghosty_home"
+[ ! -f "config.json" ] && die "config.json missing"
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  GhoSty OwO v$GHOSTY_VERSION"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+dbg "config preview:"
+cat config.json | sed 's/"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"/"TOKEN": "***"/g' | head -15
+
+token_val=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' config.json | cut -d'"' -f4)
+dbg "token: ${token_val:0:10}..."
+
+if [ "$token_val" = "YOUR_TOKEN_HERE" ] || [ -z "$token_val" ]; then
+    echo ""
+    read -p "Enter Discord token: " tok
+    [ -z "$tok" ] && die "empty token"
+    
+    dbg "token length: ${#tok}"
+    [[ ! "$tok" =~ ^[A-Za-z0-9._-]+$ ]] && warn "token has weird chars"
+    
+    dbg "validating with discord..."
+    resp=$(curl -s -o /tmp/discord_resp.json -w "%{http_code}" \
+        -H "Authorization: $tok" \
+        https://discord.com/api/v10/users/@me)
+    curl_ret=$?
+    
+    dbg "curl exit: $curl_ret, http: $resp"
+    [ $curl_ret -ne 0 ] && die "curl failed - network issue?"
+    
+    case "$resp" in
+        200)
+            ok "token valid"
+            cp config.json config.json.bak
+            tok_escaped=$(printf '%s\n' "$tok" | sed -e 's/[\/&]/\\&/g')
+            sed -i "s/YOUR_TOKEN_HERE/$tok_escaped/g" config.json
+            [ $? -ne 0 ] && python3 -c "
 import json
 with open('config.json','r') as f: c=json.load(f)
 c['TOKEN']='$tok'
 with open('config.json','w') as f: json.dump(c,f,indent=2)"
-                ok "config updated"
-                ;;
-            401) die "token invalid (401)" ;;
-            403) die "token forbidden (403)" ;;
-            429) die "rate limited (429)" ;;
-            *) die "unexpected: $resp" ;;
-        esac
-    else
-        ok "token already set"
-    fi
-    
-    dbg "installing packages..."
-    for p in python python-pillow python-numpy; do
-        dpkg -s $p &>/dev/null && ok "$p ok" || pkg install -y $p 2>&1 | tail -3
-    done
-    
-    command -v pip &>/dev/null || pkg install -y python-pip
-    ok "pip: $(pip --version 2>&1 | head -1)"
-    
-    [ -f "requirements.txt" ] && { dbg "pip requirements..."; pip install -r requirements.txt 2>&1 | tail -8; }
-    
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    dbg "python: $(python --version 2>&1)"
-    dbg "pwd: $(pwd)"
-    [ ! -f "main.py" ] && die "main.py not found"
-    dbg "main.py: yes"
-    
-    echo "starting bot..."
-    sleep 1
-    python main.py
-    py_ret=$?
-    [ $py_ret -ne 0 ] && die "python exited with code $py_ret"
-    exit
-fi
-# fresh install
-dbg "starting fresh install..."
-
-paths=(
-    "/storage/emulated/0/Download"
-    "/storage/emulated/0"
-    "/sdcard/Download"
-    "/sdcard"
-    "$HOME/storage/downloads"
-    "$HOME/storage/shared/Download"
-    "$HOME"
-    "$(pwd)"
-)
-
-zipfile=""
-foundpath=""
-
-dbg "searching for zip..."
-for p in "${paths[@]}"; do
-    [ ! -d "$p" ] && continue
-    dbg "checking: $p"
-    for zf in "$p"/GhoSty*OwO*.zip "$p"/ghosty*.zip "$p"/Ghosty*.zip; do
-        if [ -f "$zf" ]; then
-            zipfile=$(basename "$zf")
-            foundpath="$p"
-            ok "found: $zf"
-            break 2
-        fi
-    done
-done
-
-if [ -z "$foundpath" ]; then
-    warn "ZIP NOT FOUND"
-    echo "searched:"
-    for p in "${paths[@]}"; do
-        [ -d "$p" ] && echo "  [yes] $p" || echo "  [no]  $p"
-    done
-    die "download GhoSty zip to Downloads"
+            ok "config updated"
+            ;;
+        401) die "token invalid (401)" ;;
+        403) die "token forbidden (403)" ;;
+        429) die "rate limited (429)" ;;
+        *) die "unexpected: $resp" ;;
+    esac
+else
+    ok "token already set"
 fi
 
-cd "$foundpath" || die "can't cd to $foundpath"
-
-tmpextract="$HOME/ghosty_tmp"
-rm -rf "$tmpextract"
-mkdir -p "$tmpextract" || die "can't create temp dir"
-
-dbg "extracting $zipfile..."
-unzip -o "$zipfile" -d "$tmpextract"
-[ $? -ne 0 ] && die "unzip failed"
-ok "extracted"
-
-contents=$(ls -A "$tmpextract")
-count=$(echo "$contents" | wc -l)
-first=$(echo "$contents" | head -1)
-dbg "items: $count, first: $first"
-
-[ $count -eq 1 ] && [ -d "$tmpextract/$first" ] && mv "$tmpextract/$first" "$ghosty_home" || mv "$tmpextract" "$ghosty_home"
-rm -rf "$tmpextract"
-
-cd "$ghosty_home" || die "can't cd ghosty_home"
-dbg "contents:"; ls -la | head -8
-[ ! -f "config.json" ] && die "config.json missing"
-ok "installed to $ghosty_home"
-
-token_val=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' config.json | cut -d'"' -f4)
-if [ "$token_val" = "YOUR_TOKEN_HERE" ] || [ -z "$token_val" ]; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    read -p "Enter Discord token: " tok
-    [ -z "$tok" ] && die "empty token"
-    
-    resp=$(curl -s -o /tmp/discord_resp.json -w "%{http_code}" -H "Authorization: $tok" https://discord.com/api/v10/users/@me)
-    dbg "http: $resp"
-    
-    [ "$resp" = "200" ] && { ok "valid"; sed -i "s/YOUR_TOKEN_HERE/$tok/g" config.json; ok "updated"; } || die "invalid token ($resp)"
-fi
-
-dbg "installing deps..."
-pkg update -y 2>&1 | tail -2
+dbg "installing packages..."
 for p in python python-pillow python-numpy; do
-    dpkg -s $p &>/dev/null || pkg install -y $p 2>&1 | tail -3
+    dpkg -s $p &>/dev/null && ok "$p ok" || pkg install -y $p 2>&1 | tail -3
 done
+
 command -v pip &>/dev/null || pkg install -y python-pip
-[ -f "requirements.txt" ] && pip install -r requirements.txt 2>&1 | tail -8
+ok "pip: $(pip --version 2>&1 | head -1)"
+
+[ -f "requirements.txt" ] && { dbg "pip requirements..."; pip install -r requirements.txt 2>&1 | tail -8; }
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-ok "setup complete"
 dbg "python: $(python --version 2>&1)"
-[ ! -f "main.py" ] && die "main.py missing"
+dbg "pwd: $(pwd)"
+[ ! -f "main.py" ] && die "main.py not found"
 
 echo "starting bot..."
 sleep 1
 python main.py
-[ $? -ne 0 ] && die "bot crashed"
+py_ret=$?
+[ $py_ret -ne 0 ] && die "python exited with code $py_ret"
