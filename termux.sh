@@ -35,8 +35,16 @@ ok() { echo -e "${GRN}[OK]${NC} $1"; }
 warn() { echo -e "${YLW}[WARN]${NC} $1"; }
 die() { echo -e "${RED}[FATAL]${NC} $1"; echo "--- crash log: ~/ghosty_crash.log ---"; exit 1; }
 
+# handles: GhoSty OwO V4.0.2 Alpha (1).zip -> 4.0.2
+# handles: GhoSty_OwO_V4.0.3.zip -> 4.0.3
 get_zip_version() {
-    echo "$1" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+    local v=$(echo "$1" | grep -oE 'V?[0-9]+\.[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    # try without patch if not found
+    if [ -z "$v" ]; then
+        v=$(echo "$1" | grep -oE 'V?[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1)
+        [ -n "$v" ] && v="$v.0"
+    fi
+    echo "$v"
 }
 
 ver_compare() {
@@ -144,8 +152,10 @@ if [ $need_install -eq 1 ]; then
     zipfile=""
     foundpath=""
     zip_version=""
+    found_other=""
+    found_other_ver=""
     
-    dbg "searching for zip..."
+    dbg "searching for v$GHOSTY_VERSION zip..."
     for p in "${paths[@]}"; do
         [ ! -d "$p" ] && continue
         dbg "checking: $p"
@@ -153,16 +163,19 @@ if [ $need_install -eq 1 ]; then
             if [ -f "$zf" ]; then
                 tmp_zip=$(basename "$zf")
                 tmp_ver=$(get_zip_version "$tmp_zip")
-                dbg "found: $tmp_zip (v$tmp_ver)"
+                dbg "found: $tmp_zip -> v$tmp_ver"
                 
                 if [ "$tmp_ver" = "$GHOSTY_VERSION" ]; then
                     zipfile="$tmp_zip"
                     foundpath="$p"
                     zip_version="$tmp_ver"
-                    ok "matched: v$zip_version"
+                    ok "matched v$zip_version"
                     break 2
                 else
-                    dbg "skipping: need v$GHOSTY_VERSION, found v$tmp_ver"
+                    # remember wrong version for error message
+                    found_other="$tmp_zip"
+                    found_other_ver="$tmp_ver"
+                    warn "wrong version: need v$GHOSTY_VERSION, found v$tmp_ver"
                 fi
             fi
         done
@@ -170,15 +183,20 @@ if [ $need_install -eq 1 ]; then
     
     if [ -z "$foundpath" ]; then
         echo ""
-        echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         if [ $is_upgrade -eq 1 ]; then
-            echo -e "${YLW}  UPDATE REQUIRED: v$installed_version -> v$GHOSTY_VERSION${NC}"
+            echo -e "${RED}  UPDATE REQUIRED: v$installed_version -> v$GHOSTY_VERSION${NC}"
         else
-            echo -e "${YLW}  INSTALL REQUIRED: v$GHOSTY_VERSION${NC}"
+            echo -e "${RED}  VERSION MISMATCH${NC}"
         fi
-        echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        echo "  Please download: GhoSty_OwO_V${GHOSTY_VERSION}.zip"
+        if [ -n "$found_other" ]; then
+            echo "  Found: $found_other (v$found_other_ver)"
+            echo "  Need:  v$GHOSTY_VERSION"
+            echo ""
+        fi
+        echo "  Please download: GhoSty OwO V${GHOSTY_VERSION}.zip"
         echo "  Put it in your Downloads folder"
         echo ""
         echo "  Then run this script again"
