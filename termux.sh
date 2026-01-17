@@ -155,7 +155,6 @@ if [ $need_install -eq 1 ]; then
                 tmp_ver=$(get_zip_version "$tmp_zip")
                 dbg "found: $tmp_zip (v$tmp_ver)"
                 
-                # check if this zip matches required version
                 if [ "$tmp_ver" = "$GHOSTY_VERSION" ]; then
                     zipfile="$tmp_zip"
                     foundpath="$p"
@@ -169,7 +168,6 @@ if [ $need_install -eq 1 ]; then
         done
     done
     
-    # no matching zip found
     if [ -z "$foundpath" ]; then
         echo ""
         echo -e "${YLW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -188,7 +186,6 @@ if [ $need_install -eq 1 ]; then
         die "zip v$GHOSTY_VERSION not found"
     fi
     
-    # backup token
     old_token=""
     if [ -f "$ghosty_home/config.json" ]; then
         old_token=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' "$ghosty_home/config.json" | cut -d'"' -f4)
@@ -220,7 +217,6 @@ if [ $need_install -eq 1 ]; then
     fi
     rm -rf "$tmpextract"
     
-    # save version from zip, not script
     echo "$zip_version" > "$ghosty_home/.ghosty_version"
     
     if [ $is_upgrade -eq 1 ]; then
@@ -229,7 +225,6 @@ if [ $need_install -eq 1 ]; then
         ok "installed v$zip_version"
     fi
     
-    # restore token
     if [ -n "$old_token" ]; then
         sed -i "s/YOUR_TOKEN_HERE/$old_token/g" "$ghosty_home/config.json" 2>/dev/null
         ok "token restored"
@@ -261,13 +256,11 @@ if [ "$token_val" = "YOUR_TOKEN_HERE" ] || [ -z "$token_val" ]; then
     [[ ! "$tok" =~ ^[A-Za-z0-9._-]+$ ]] && warn "token has weird chars"
     
     dbg "validating with discord..."
-    resp=$(curl -s -o /tmp/discord_resp.json -w "%{http_code}" \
+    resp=$(curl -s -w "%{http_code}" \
         -H "Authorization: $tok" \
-        https://discord.com/api/v10/users/@me)
-    curl_ret=$?
+        https://discord.com/api/v10/users/@me -o /dev/null)
     
-    dbg "curl exit: $curl_ret, http: $resp"
-    [ $curl_ret -ne 0 ] && die "curl failed - network issue?"
+    dbg "http: $resp"
     
     case "$resp" in
         200)
@@ -285,6 +278,7 @@ with open('config.json','w') as f: json.dump(c,f,indent=2)"
         401) die "token invalid (401)" ;;
         403) die "token forbidden (403)" ;;
         429) die "rate limited (429)" ;;
+        000) die "network error - check internet" ;;
         *) die "unexpected: $resp" ;;
     esac
 else
