@@ -35,11 +35,8 @@ ok() { echo -e "${GRN}[OK]${NC} $1"; }
 warn() { echo -e "${YLW}[WARN]${NC} $1"; }
 die() { echo -e "${RED}[FATAL]${NC} $1"; echo "--- crash log: ~/ghosty_crash.log ---"; exit 1; }
 
-# handles: GhoSty OwO V4.0.2 Alpha (1).zip -> 4.0.2
-# handles: GhoSty_OwO_V4.0.3.zip -> 4.0.3
 get_zip_version() {
     local v=$(echo "$1" | grep -oE 'V?[0-9]+\.[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    # try without patch if not found
     if [ -z "$v" ]; then
         v=$(echo "$1" | grep -oE 'V?[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1)
         [ -n "$v" ] && v="$v.0"
@@ -92,7 +89,7 @@ fi
 
 dbg "checking tools..."
 missing=()
-for tool in unzip curl sed grep; do
+for tool in unzip curl sed grep find; do
     command -v $tool &>/dev/null && ok "$tool found" || { warn "$tool missing"; missing+=($tool); }
 done
 
@@ -108,7 +105,6 @@ ghosty_home="$HOME/ghosty"
 version_file="$ghosty_home/.ghosty_version"
 dbg "ghosty_home = $ghosty_home"
 
-# check installed version
 installed_version=""
 need_install=0
 is_upgrade=0
@@ -136,7 +132,6 @@ else
     need_install=1
 fi
 
-# install/upgrade
 if [ $need_install -eq 1 ]; then
     paths=(
         "/storage/emulated/0/Download"
@@ -155,30 +150,47 @@ if [ $need_install -eq 1 ]; then
     found_other=""
     found_other_ver=""
     
-    dbg "searching for v$GHOSTY_VERSION zip..."
+    dbg "searching for v$GHOSTY_VERSION zip (including subfolders)..."
+    
+    # search function - checks a file path
+    check_zip() {
+        local zf="$1"
+        [ ! -f "$zf" ] && return 1
+        
+        local tmp_zip=$(basename "$zf")
+        local tmp_ver=$(get_zip_version "$tmp_zip")
+        local tmp_dir=$(dirname "$zf")
+        dbg "found: $zf -> v$tmp_ver"
+        
+        if [ "$tmp_ver" = "$GHOSTY_VERSION" ]; then
+            zipfile="$tmp_zip"
+            foundpath="$tmp_dir"
+            zip_version="$tmp_ver"
+            ok "matched v$zip_version"
+            return 0
+        else
+            found_other="$tmp_zip"
+            found_other_ver="$tmp_ver"
+            warn "wrong version: need v$GHOSTY_VERSION, found v$tmp_ver"
+            return 1
+        fi
+    }
+    
     for p in "${paths[@]}"; do
         [ ! -d "$p" ] && continue
         dbg "checking: $p"
+        
+        # direct files first (faster)
         for zf in "$p"/GhoSty*OwO*.zip "$p"/ghosty*.zip "$p"/Ghosty*.zip; do
-            if [ -f "$zf" ]; then
-                tmp_zip=$(basename "$zf")
-                tmp_ver=$(get_zip_version "$tmp_zip")
-                dbg "found: $tmp_zip -> v$tmp_ver"
-                
-                if [ "$tmp_ver" = "$GHOSTY_VERSION" ]; then
-                    zipfile="$tmp_zip"
-                    foundpath="$p"
-                    zip_version="$tmp_ver"
-                    ok "matched v$zip_version"
-                    break 2
-                else
-                    # remember wrong version for error message
-                    found_other="$tmp_zip"
-                    found_other_ver="$tmp_ver"
-                    warn "wrong version: need v$GHOSTY_VERSION, found v$tmp_ver"
-                fi
-            fi
+            check_zip "$zf" && break 2
         done
+        
+        # now dig into subfolders - max 3 levels deep cuz users do weird stuff
+        while IFS= read -r -d '' zf; do
+            check_zip "$zf" && break 2
+        done < <(find "$p" -maxdepth 3 -type f \( -iname "GhoSty*OwO*.zip" -o -iname "ghosty*.zip" \) -print0 2>/dev/null)
+        
+        [ -n "$foundpath" ] && break
     done
     
     if [ -z "$foundpath" ]; then
@@ -197,7 +209,7 @@ if [ $need_install -eq 1 ]; then
             echo ""
         fi
         echo "  Please download: GhoSty OwO V${GHOSTY_VERSION}.zip"
-        echo "  Put it in your Downloads folder"
+        echo "  Put it in your Downloads folder (or any subfolder)"
         echo ""
         echo "  Then run this script again"
         echo ""
@@ -218,7 +230,7 @@ if [ $need_install -eq 1 ]; then
     rm -rf "$tmpextract"
     mkdir -p "$tmpextract" || die "can't create temp dir"
     
-    dbg "extracting $zipfile..."
+    dbg "extracting $zipfile from $foundpath..."
     unzip -o "$zipfile" -d "$tmpextract"
     [ $? -ne 0 ] && die "unzip failed"
     ok "extracted"
@@ -249,7 +261,6 @@ if [ $need_install -eq 1 ]; then
     fi
 fi
 
-# run
 cd "$ghosty_home" || die "can't cd to $ghosty_home"
 [ ! -f "config.json" ] && die "config.json missing"
 
