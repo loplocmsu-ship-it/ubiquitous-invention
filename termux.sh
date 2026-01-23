@@ -5,19 +5,39 @@ GHOSTY_VERSION="4.0.3"
 
 # === AUTO UPDATE ===
 SCRIPT_URL="https://raw.githubusercontent.com/loplocmsu-ship-it/ubiquitous-invention/refs/heads/main/termux.sh"
-SCRIPT_PATH="$HOME/termux.sh"
+
+# detect where script is actually running from
+if [ -n "${BASH_SOURCE[0]}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+else
+    SCRIPT_PATH="$HOME/termux.sh"
+fi
 
 if [ "$1" != "--no-update" ]; then
     echo "checking for updates..."
+    echo "[DBG] script path: $SCRIPT_PATH"
+    
     if curl -sL "$SCRIPT_URL" -o /tmp/termux_new.sh 2>/dev/null; then
-        if [ -f "$SCRIPT_PATH" ] && ! cmp -s "$SCRIPT_PATH" /tmp/termux_new.sh; then
+        if [ ! -s /tmp/termux_new.sh ]; then
+            echo "[WARN] download empty/failed"
+        elif [ ! -f "$SCRIPT_PATH" ]; then
+            echo "installing to $SCRIPT_PATH..."
+            cp /tmp/termux_new.sh "$SCRIPT_PATH"
+            chmod +x "$SCRIPT_PATH"
+            rm -f /tmp/termux_new.sh
+            exec bash "$SCRIPT_PATH" --no-update
+        elif ! cmp -s "$SCRIPT_PATH" /tmp/termux_new.sh; then
             echo "new version found, updating..."
             cp /tmp/termux_new.sh "$SCRIPT_PATH"
             chmod +x "$SCRIPT_PATH"
             rm -f /tmp/termux_new.sh
             exec bash "$SCRIPT_PATH" --no-update
+        else
+            echo "[DBG] already latest"
         fi
         rm -f /tmp/termux_new.sh
+    else
+        echo "[WARN] update check failed (no internet?)"
     fi
 fi
 # === END AUTO UPDATE ===
@@ -55,7 +75,6 @@ ver_compare() {
     return 1
 }
 
-# checks if token is placeholder or invalid
 is_placeholder_token() {
     local t="$1"
     [ -z "$t" ] && return 0
@@ -66,7 +85,6 @@ is_placeholder_token() {
     [[ "${t,,}" == *"add token"* ]] && return 0
     [[ "${t,,}" == *"enter token"* ]] && return 0
     [[ "${t,,}" == *"put token"* ]] && return 0
-    # real tokens are 70+ chars
     [ ${#t} -lt 50 ] && return 0
     return 1
 }
@@ -232,7 +250,6 @@ if [ $need_install -eq 1 ]; then
     old_token=""
     if [ -f "$ghosty_home/config.json" ]; then
         old_token=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' "$ghosty_home/config.json" | cut -d'"' -f4)
-        # dont backup if its a placeholder
         is_placeholder_token "$old_token" && old_token=""
         [ -n "$old_token" ] && dbg "backed up token"
     fi
@@ -270,7 +287,6 @@ if [ $need_install -eq 1 ]; then
     fi
     
     if [ -n "$old_token" ]; then
-        # handle both old and new placeholder formats
         sed -i "s/YOUR_TOKEN_HERE/$old_token/g; s/Add your token here/$old_token/g" "$ghosty_home/config.json" 2>/dev/null
         ok "token restored"
     fi
@@ -311,9 +327,7 @@ if is_placeholder_token "$token_val"; then
             ok "token valid"
             cp config.json config.json.bak
             tok_escaped=$(printf '%s\n' "$tok" | sed -e 's/[\/&]/\\&/g')
-            # replace both placeholder formats
             sed -i "s/YOUR_TOKEN_HERE/$tok_escaped/g; s/Add your token here/$tok_escaped/g" config.json
-            # fallback if sed didnt work (some edge case)
             if is_placeholder_token "$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' config.json | cut -d'"' -f4)"; then
                 dbg "sed failed, using python..."
                 python3 -c "
