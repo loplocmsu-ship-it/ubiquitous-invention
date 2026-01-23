@@ -55,6 +55,22 @@ ver_compare() {
     return 1
 }
 
+# checks if token is placeholder or invalid
+is_placeholder_token() {
+    local t="$1"
+    [ -z "$t" ] && return 0
+    [ "$t" = "YOUR_TOKEN_HERE" ] && return 0
+    [ "$t" = "Add your token here" ] && return 0
+    [[ "${t,,}" == *"your token"* ]] && return 0
+    [[ "${t,,}" == *"token here"* ]] && return 0
+    [[ "${t,,}" == *"add token"* ]] && return 0
+    [[ "${t,,}" == *"enter token"* ]] && return 0
+    [[ "${t,,}" == *"put token"* ]] && return 0
+    # real tokens are 70+ chars
+    [ ${#t} -lt 50 ] && return 0
+    return 1
+}
+
 exec > >(tee -a ~/ghosty_crash.log) 2>&1
 echo "=== RUN $(date) ===" >> ~/ghosty_crash.log
 
@@ -152,7 +168,6 @@ if [ $need_install -eq 1 ]; then
     
     dbg "searching for v$GHOSTY_VERSION zip (including subfolders)..."
     
-    # search function - checks a file path
     check_zip() {
         local zf="$1"
         [ ! -f "$zf" ] && return 1
@@ -180,12 +195,10 @@ if [ $need_install -eq 1 ]; then
         [ ! -d "$p" ] && continue
         dbg "checking: $p"
         
-        # direct files first (faster)
         for zf in "$p"/GhoSty*OwO*.zip "$p"/ghosty*.zip "$p"/Ghosty*.zip; do
             check_zip "$zf" && break 2
         done
         
-        # now dig into subfolders - max 3 levels deep cuz users do weird stuff
         while IFS= read -r -d '' zf; do
             check_zip "$zf" && break 2
         done < <(find "$p" -maxdepth 3 -type f \( -iname "GhoSty*OwO*.zip" -o -iname "ghosty*.zip" \) -print0 2>/dev/null)
@@ -219,7 +232,8 @@ if [ $need_install -eq 1 ]; then
     old_token=""
     if [ -f "$ghosty_home/config.json" ]; then
         old_token=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' "$ghosty_home/config.json" | cut -d'"' -f4)
-        [ "$old_token" = "YOUR_TOKEN_HERE" ] && old_token=""
+        # dont backup if its a placeholder
+        is_placeholder_token "$old_token" && old_token=""
         [ -n "$old_token" ] && dbg "backed up token"
     fi
     
@@ -256,7 +270,8 @@ if [ $need_install -eq 1 ]; then
     fi
     
     if [ -n "$old_token" ]; then
-        sed -i "s/YOUR_TOKEN_HERE/$old_token/g" "$ghosty_home/config.json" 2>/dev/null
+        # handle both old and new placeholder formats
+        sed -i "s/YOUR_TOKEN_HERE/$old_token/g; s/Add your token here/$old_token/g" "$ghosty_home/config.json" 2>/dev/null
         ok "token restored"
     fi
 fi
@@ -276,7 +291,7 @@ cat config.json | sed 's/"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"/"TOKEN": "***"/
 token_val=$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' config.json | cut -d'"' -f4)
 dbg "token: ${token_val:0:10}..."
 
-if [ "$token_val" = "YOUR_TOKEN_HERE" ] || [ -z "$token_val" ]; then
+if is_placeholder_token "$token_val"; then
     echo ""
     read -p "Enter Discord token: " tok
     [ -z "$tok" ] && die "empty token"
@@ -296,12 +311,17 @@ if [ "$token_val" = "YOUR_TOKEN_HERE" ] || [ -z "$token_val" ]; then
             ok "token valid"
             cp config.json config.json.bak
             tok_escaped=$(printf '%s\n' "$tok" | sed -e 's/[\/&]/\\&/g')
-            sed -i "s/YOUR_TOKEN_HERE/$tok_escaped/g" config.json
-            [ $? -ne 0 ] && python3 -c "
+            # replace both placeholder formats
+            sed -i "s/YOUR_TOKEN_HERE/$tok_escaped/g; s/Add your token here/$tok_escaped/g" config.json
+            # fallback if sed didnt work (some edge case)
+            if is_placeholder_token "$(grep -o '"TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"' config.json | cut -d'"' -f4)"; then
+                dbg "sed failed, using python..."
+                python3 -c "
 import json
 with open('config.json','r') as f: c=json.load(f)
 c['TOKEN']='$tok'
-with open('config.json','w') as f: json.dump(c,f,indent=2)"
+with open('config.json','w') as f: json.dump(c,f,indent=4)"
+            fi
             ok "config updated"
             ;;
         401) die "token invalid (401)" ;;
